@@ -113,45 +113,45 @@ app.post('/disconnect', (_, res) => {
 app.post('/jump/:s', async (req, res) => {
   const s = req.params.s;
   if (!['0', '1', '2'].includes(s)) return res.status(400).json({ error: 'screen must be 0/1/2' });
-  try { await send(`JUMP${s}`); ok(res, `JUMP${s}`); } catch (e) { fail(res, e); }
+  try { await send(`JUMP(${s});`); ok(res, `JUMP(${s});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/qbar', async (req, res) => {
   const { url } = req.body; if (!url) return res.status(400).json({ error: 'url required' });
-  try { await send(`QBAR0,${url}`); ok(res, `QBAR0,${url}`); } catch (e) { fail(res, e); }
+  try { await send(`QBAR(0,${url});`); ok(res, `QBAR(0,${url});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/settxt/bank', async (req, res) => {
   const { name } = req.body; if (!name) return res.status(400).json({ error: 'name required' });
-  try { await send(`SETTXT0,${name}`); ok(res, `SETTXT0,${name}`); } catch (e) { fail(res, e); }
+  try { await send(`SET_TXT(0,${name});`); ok(res, `SET_TXT(0,${name});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/settxt/account', async (req, res) => {
   const { number } = req.body; if (!number) return res.status(400).json({ error: 'number required' });
-  try { await send(`SETTXT1,${number}`); ok(res, `SETTXT1,${number}`); } catch (e) { fail(res, e); }
+  try { await send(`SET_TXT(1,${number});`); ok(res, `SET_TXT(1,${number});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/settxt/amount', async (req, res) => {
   const { amount } = req.body; if (!amount) return res.status(400).json({ error: 'amount required' });
-  try { await send(`SETTXT2,${amount}`); ok(res, `SETTXT2,${amount}`); } catch (e) { fail(res, e); }
+  try { await send(`SET_TXT(2,${amount});`); ok(res, `SET_TXT(2,${amount});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/brightness/:lvl', async (req, res) => {
   const lvl = parseInt(req.params.lvl, 10);
   if (isNaN(lvl) || lvl < 0 || lvl > 255) return res.status(400).json({ error: 'level must be 0-255' });
-  try { await send(`BL${lvl}`); ok(res, `BL${lvl}`); } catch (e) { fail(res, e); }
+  try { await send(`BL(${lvl});`); ok(res, `BL(${lvl});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/clear', async (_, res) => { try { await send('CLRF'); ok(res, 'CLRF'); } catch (e) { fail(res, e); } });
-app.post('/reset', async (_, res) => { try { await send('JUMP0'); ok(res, 'JUMP0'); } catch (e) { fail(res, e); } });
-app.post('/payment-success', async (_, res) => { try { await send('JUMP2'); ok(res, 'JUMP2'); } catch (e) { fail(res, e); } });
+app.post('/reset', async (_, res) => { try { await send('JUMP(0);'); ok(res, 'JUMP(0);'); } catch (e) { fail(res, e); } });
+app.post('/payment-success', async (_, res) => { try { await send('JUMP(2);'); ok(res, 'JUMP(2);'); } catch (e) { fail(res, e); } });
 
 app.post('/payment', async (req, res) => {
   const { bank, account, amount, qrUrl } = req.body;
   if (!bank || !account || !amount || !qrUrl)
     return res.status(400).json({ error: 'bank, account, amount, qrUrl required' });
   try {
-    const seq = [`JUMP1`, `QBAR0,${qrUrl}`, `SETTXT0,${bank}`, `SETTXT1,${account}`, `SETTXT2,${amount}`, `CLRF`];
+    const seq = [`JUMP(1);`, `QBAR(0,${qrUrl});`, `SET_TXT(0,${bank});`, `SET_TXT(1,${account});`, `SET_TXT(2,${amount});`, `CLRF`];
     for (const cmd of seq) { await send(cmd); await wait(100); }
     res.json({ success: true, sequence: seq });
   } catch (e) { fail(res, e); }
