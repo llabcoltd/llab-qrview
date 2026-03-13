@@ -87,7 +87,9 @@ app.get('/health', async (_, res) => {
     serverVersion: '1.0.0', uptime: Math.floor(process.uptime()),
     isConnected: MOCK ? false : !!(sp && sp.isOpen),
     connectedPort: MOCK ? null : connectedPort,
-    availablePorts: ports.map(p => ({ path: p.path, vendorId: p.vendorId }))
+    availablePorts: ports.map(p => ({ path: p.path, vendorId: p.vendorId, manufacturer: p.manufacturer })),
+    autoStartRegistered: fs.existsSync(FLAG),
+    logFile: LOG
   });
 });
 
@@ -167,12 +169,16 @@ async function main() {
   } else {
     if (!fs.existsSync(FLAG)) {
       log('First run — registering autostart...');
-      setupAutoStart(process.execPath);
-      fs.writeFileSync(FLAG, JSON.stringify({
-        installedAt: new Date().toISOString(),
-        os: os.platform(), arch: os.arch(), path: process.execPath
-      }));
-      log('Autostart registered. Will start on every reboot from now on.');
+      const ok = setupAutoStart(process.execPath);
+      if (ok) {
+        fs.writeFileSync(FLAG, JSON.stringify({
+          installedAt: new Date().toISOString(),
+          os: os.platform(), arch: os.arch(), path: process.execPath
+        }));
+        log('Autostart registered. Will start on every reboot from now on.');
+      } else {
+        log('Autostart registration FAILED — server runs now but will NOT auto-start on reboot. Check log for details.', 'WARN');
+      }
     } else {
       const m = JSON.parse(fs.readFileSync(FLAG, 'utf-8'));
       log(`Autostart already registered (installed: ${m.installedAt})`);

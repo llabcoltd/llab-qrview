@@ -9,14 +9,15 @@ function setupAutoStart(execPath) {
     if (p === 'win32')       setupWindows(execPath);
     else if (p === 'darwin') setupMacOS(execPath);
     else                     setupLinux(execPath);
-  } catch (e) { console.error('[AutoStart] Error:', e.message); }
+    return true;
+  } catch (e) { console.error('[AutoStart] Error:', e.message); return false; }
 }
 
 function removeAutoStart() {
   const p = os.platform();
   try {
     if (p === 'win32') {
-      execSync('schtasks /delete /tn "QRViewServer" /f', { stdio: 'ignore' });
+      execSync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v QRViewServer /f', { stdio: 'ignore' });
     } else if (p === 'darwin') {
       const pl = path.join(os.homedir(),'Library','LaunchAgents','com.qrview.server.plist');
       execSync(`launchctl unload -w "${pl}"`, { stdio: 'ignore' });
@@ -31,33 +32,11 @@ function removeAutoStart() {
 }
 
 function setupWindows(execPath) {
-  const xp = path.join(os.tmpdir(), 'qrview-task.xml');
-  const xml = `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>QR-VIEW Serial Background Agent</Description></RegistrationInfo>
-  <Triggers>
-    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
-    <BootTrigger><Enabled>true</Enabled></BootTrigger>
-  </Triggers>
-  <Principals><Principal id="Author">
-    <LogonType>InteractiveToken</LogonType>
-    <RunLevel>HighestAvailable</RunLevel>
-  </Principal></Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
-  </Settings>
-  <Actions><Exec>
-    <Command>${execPath.replace(/\\/g,'\\\\')}</Command>
-  </Exec></Actions>
-</Task>`;
-  fs.writeFileSync(xp, xml, 'utf-16le');
-  execSync(`schtasks /create /tn "QRViewServer" /xml "${xp}" /f`, { windowsHide:true, stdio:'ignore' });
-  fs.unlinkSync(xp);
-  console.log('[AutoStart] Windows Task Scheduler entry created. Auto-starts on every logon.');
+  // Use HKCU registry run key — no admin rights required
+  const regKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+  const quoted = `"${execPath}"`;
+  execSync(`reg add "${regKey}" /v QRViewServer /t REG_SZ /d ${quoted} /f`, { windowsHide: true });
+  console.log('[AutoStart] Windows registry Run key added. Auto-starts on every logon (no admin needed).');
 }
 
 function setupMacOS(execPath) {
