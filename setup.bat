@@ -18,7 +18,7 @@ echo [%date% %time%] Running as administrator >> "%LOG%"
 
 set INSTALL_DIR=%APPDATA%\QRViewAgent
 set PORT=3535
-set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/download/v1.0.0/qrview-server-win.exe
+set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/latest/download/qrview-server-win.exe
 
 echo [%date% %time%] Using URL %BINARY_URL% >> "%LOG%"
 

@@ -13,7 +13,7 @@ set EXE_DEST=%INSTALL_DIR%\%EXE_NAME%
 set FLAG=%USERPROFILE%\.qrview_installed
 set LOG=%USERPROFILE%\qrview-setup.log
 set PORT=3535
-set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/download/v1.0.0/qrview-server-win.exe
+set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/latest/download/qrview-server-win.exe
 
 echo [%date% %time%] Setup/Update started > "%LOG%"
 
