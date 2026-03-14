@@ -1,96 +1,112 @@
 @echo off
-:: ══════════════════════════════════════════════════════════════════════════════
-::  QR-VIEW Agent Setup — Windows
-::  Place this file in the same folder as qrview-server-win.exe and double-click.
-:: ══════════════════════════════════════════════════════════════════════════════
-title QR-VIEW Agent Setup
+setlocal enabledelayedexpansion
 
-:: ── Keep window open on any early exit ───────────────────────────────────────
-setlocal
+:: ── Log everything so we can debug if window closes ──────────────────────────
+set LOG=%USERPROFILE%\qrview-setup.log
+echo [%date% %time%] Setup started > "%LOG%"
 
-set PORT=3535
-set INSTALL_DIR=%APPDATA%\QRViewAgent
-set SCRIPT_DIR=%~dp0
-set EXE_NAME=qrview-server-win.exe
-set EXE_SRC=%SCRIPT_DIR%%EXE_NAME%
-set EXE_DEST=%INSTALL_DIR%\%EXE_NAME%
-
-echo.
-echo  ==========================================
-echo   QR-VIEW Agent Setup - Windows
-echo  ==========================================
-echo.
-
-:: ── Check exe is next to this bat ─────────────────────────────────────────────
-if not exist "%EXE_SRC%" (
-  echo  [ERROR] Cannot find %EXE_NAME% in:
-  echo          %SCRIPT_DIR%
-  echo.
-  echo  Please place setup.bat and %EXE_NAME% in the same folder.
-  echo.
-  pause
-  exit /b 1
-)
-
-:: ── Check if already running ──────────────────────────────────────────────────
-curl -sf "http://localhost:%PORT%/health" >nul 2>&1
-if %errorLevel% == 0 (
-  echo  [OK] QR-VIEW Agent is already running on http://localhost:%PORT%
-  echo.
-  echo  To check status:  curl http://localhost:%PORT%/health
-  echo  Log file:         %USERPROFILE%\qrview-server.log
-  echo.
-  pause
-  exit /b 0
-)
-
-:: ── Copy exe to install dir ───────────────────────────────────────────────────
-echo  [1/2] Installing to %INSTALL_DIR% ...
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-copy /Y "%EXE_SRC%" "%EXE_DEST%" >nul
+:: ── Elevation check: are we already admin? ───────────────────────────────────
+whoami /groups | find "S-1-16-12288" >nul 2>&1
 if %errorLevel% neq 0 (
-  echo  [ERROR] Failed to copy exe. Check permissions.
-  echo.
-  pause
-  exit /b 1
+    echo [%date% %time%] Requesting admin elevation... >> "%LOG%"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
 )
-echo  [OK] Copied to %EXE_DEST%
 
-:: ── Start the agent ───────────────────────────────────────────────────────────
+echo [%date% %time%] Running as administrator >> "%LOG%"
+
+set INSTALL_DIR=%APPDATA%\QRViewAgent
+set PORT=3535
+set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/download/v1.0.0/qrview-server-win.exe
+
+echo [%date% %time%] Using URL %BINARY_URL% >> "%LOG%"
+
 echo.
-echo  [2/2] Starting QR-VIEW Agent...
-start "" "%EXE_DEST%"
+echo ==========================================
+echo   QR-VIEW Agent Setup - Windows
+echo ==========================================
+echo.
 
-:: Wait up to 10 seconds for agent to start
+echo [%date% %time%] Checking if already running... >> "%LOG%"
+
+:: ── Already running? ─────────────────────────────────────────────────────────
+curl -sf --max-time 3 "http://localhost:%PORT%/health" >nul 2>&1
+if %errorLevel% == 0 (
+    echo [OK] Already running on http://localhost:%PORT%
+    echo [%date% %time%] Already running - nothing to do >> "%LOG%"
+    echo.
+    pause
+    exit /b 0
+)
+
+:: ── Check curl available ─────────────────────────────────────────────────────
+where curl >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] curl not found. Please update Windows or install curl.
+    echo [%date% %time%] ERROR curl not found >> "%LOG%"
+    echo.
+    pause
+    exit /b 1
+)
+
+:: ── Download binary ──────────────────────────────────────────────────────────
+echo [1/3] Downloading QR-VIEW Agent...
+echo [%date% %time%] Downloading from %BINARY_URL% >> "%LOG%"
+
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+
+curl -L --progress-bar "%BINARY_URL%" -o "%INSTALL_DIR%\qrview-server.exe" >> "%LOG%" 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] Download failed. Check your internet connection.
+    echo [%date% %time%] ERROR download failed >> "%LOG%"
+    echo See log: %LOG%
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [OK] Downloaded to %INSTALL_DIR%\qrview-server.exe
+echo [%date% %time%] Download complete >> "%LOG%"
+
+:: ── Start agent ──────────────────────────────────────────────────────────────
+echo.
+echo [2/3] Starting agent...
+echo [%date% %time%] Starting binary >> "%LOG%"
+
+start "" /B "%INSTALL_DIR%\qrview-server.exe"
+
+:: ── Verify ───────────────────────────────────────────────────────────────────
+echo.
+echo [3/3] Verifying...
+
 set STARTED=0
 for /l %%i in (1,1,10) do (
-  timeout /t 1 /nobreak >nul
-  curl -sf "http://localhost:%PORT%/health" >nul 2>&1
-  if not errorlevel 1 (
-    set STARTED=1
-    goto :CHECK_DONE
-  )
+    timeout 1 /nobreak >nul
+    curl -sf --max-time 2 "http://localhost:%PORT%/health" >nul 2>&1
+    if !errorLevel! == 0 (
+        set STARTED=1
+        goto :VERIFY_DONE
+    )
 )
-:CHECK_DONE
+
+:VERIFY_DONE
 
 echo.
 if "%STARTED%"=="1" (
-  echo  ==========================================
-  echo   [OK] QR-VIEW Agent is running!
-  echo        http://localhost:%PORT%
-  echo.
-  echo   Auto-start registered — starts on every login.
-  echo   Log file: %USERPROFILE%\qrview-server.log
-  echo  ==========================================
+    echo ==========================================
+    echo   [OK] QR-VIEW Agent is running!
+    echo   http://localhost:%PORT%
+    echo   Auto-starts with Windows.
+    echo ==========================================
+    echo [%date% %time%] SUCCESS agent running on port %PORT% >> "%LOG%"
 ) else (
-  echo  [WARN] Agent did not respond in time.
-  echo.
-  echo  Check the log for errors:
-  echo    %USERPROFILE%\qrview-server.log
-  echo.
-  echo  Or open a new terminal and run:
-  echo    curl http://localhost:%PORT%/health
+    echo [WARN] Agent started but health check timed out.
+    echo Check log: %LOG%
+    echo [%date% %time%] WARN health check timed out >> "%LOG%"
 )
 
+echo.
+echo Log file: %LOG%
 echo.
 pause
