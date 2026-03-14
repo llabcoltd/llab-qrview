@@ -69,6 +69,12 @@ if %errorLevel% neq 0 (
 echo [OK] Downloaded to %INSTALL_DIR%\qrview-server.exe
 echo [%date% %time%] Download complete >> "%LOG%"
 
+:: ── Delete install flag so autostart re-registers on first run ───────────────
+if exist "%USERPROFILE%\.qrview_installed" (
+    del /f "%USERPROFILE%\.qrview_installed" >nul 2>&1
+    echo [%date% %time%] Install flag deleted >> "%LOG%"
+)
+
 :: ── Start agent ──────────────────────────────────────────────────────────────
 echo.
 echo [2/3] Starting agent...

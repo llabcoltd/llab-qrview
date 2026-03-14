@@ -90,7 +90,7 @@ echo [%date% %time%] Download complete >> "%LOG%"
 :: ── Start new version ────────────────────────────────────────────────────────
 echo  [5/5] Starting QR-VIEW Agent...
 echo [%date% %time%] Starting binary >> "%LOG%"
-start "" "%EXE_DEST%"
+start "" /B "%EXE_DEST%"
 
 :: Wait up to 10 seconds for health check
 set STARTED=0
