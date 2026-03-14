@@ -1,8 +1,29 @@
 'use strict';
-const express = require('express'), cors = require('cors');
-const { SerialPort } = require('serialport');
 const os = require('os'), fs = require('fs'), path = require('path');
-const { setupAutoStart, removeAutoStart } = require('./autostart');
+
+// ── Catch fatal startup errors and write to log before crashing ───────────────
+const EARLY_LOG = path.join(os.homedir(), 'qrview-server.log');
+function fatalExit(msg) {
+  const line = `[${new Date().toISOString()}] [FATAL] ${msg}\n`;
+  console.error(line);
+  try { fs.appendFileSync(EARLY_LOG, line); } catch (_) {}
+  console.error(`\nLog saved to: ${EARLY_LOG}`);
+  console.error('This window will close in 15 seconds...');
+  setTimeout(() => process.exit(1), 15000);
+}
+process.on('uncaughtException', e => fatalExit(e.stack || e.message));
+
+let express, cors, SerialPort, setupAutoStart, removeAutoStart;
+try {
+  express = require('express');
+  cors = require('cors');
+  ({ SerialPort } = require('serialport'));
+  ({ setupAutoStart, removeAutoStart } = require('./autostart'));
+} catch (e) {
+  fatalExit(`Failed to load module: ${e.message}\n${e.stack}`);
+  // prevent rest of file from running while the 15s timer counts down
+  throw e;
+}
 
 const PORT = 3535, BAUD = 115200;
 const FLAG = path.join(os.homedir(), '.qrview_installed');

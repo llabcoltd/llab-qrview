@@ -8,20 +8,18 @@ Background agent that controls the QR-VIEW USB display via SerialPort, exposed a
 
 ### Prerequisites
 
-Install [Node.js 18+](https://nodejs.org) and then install dependencies:
+Install [Node.js 18+](https://nodejs.org). That's it — the build scripts handle `npm install` automatically.
 
-```bash
-npm install
-```
+> **Important:** always use `npm run build:*` instead of running `npx pkg` directly.
+> The build scripts run `npm install` first to ensure all platform-specific native
+> bindings (including Windows) are downloaded before packaging.
 
 ---
 
 ### Windows (x64)
 
-Run on a **Windows machine** or cross-compile from any OS:
-
 ```bash
-npx pkg . --target node18-win-x64 --output qrview-server-win.exe
+npm run build:win
 ```
 
 Output: `qrview-server-win.exe`
@@ -30,15 +28,13 @@ Output: `qrview-server-win.exe`
 
 ### macOS (Apple Silicon — M1/M2/M3)
 
-Run on a **macOS arm64 machine**:
-
 ```bash
-npx pkg . --target node18-mac-arm64 --output qrview-server-macos-arm64
+npm run build:mac
 ```
 
 Output: `qrview-server-macos-arm64`
 
-After building on macOS, make it executable:
+After building, make it executable:
 
 ```bash
 chmod +x qrview-server-macos-arm64
@@ -49,8 +45,10 @@ chmod +x qrview-server-macos-arm64
 ### macOS (Intel)
 
 ```bash
-npx pkg . --target node18-mac-x64 --output qrview-server-macos-x64
+npm run build:mac-intel
 ```
+
+Output: `qrview-server-macos-x64`
 
 ---
 

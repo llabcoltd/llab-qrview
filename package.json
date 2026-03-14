@@ -5,7 +5,10 @@
   "main": "server.js",
   "bin": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:win": "npm install && npx pkg . --target node18-win-x64 --output qrview-server-win.exe",
+    "build:mac": "npm install && npx pkg . --target node18-mac-arm64 --output qrview-server-macos-arm64",
+    "build:mac-intel": "npm install && npx pkg . --target node18-mac-x64 --output qrview-server-macos-x64"
   },
   "dependencies": {
     "express": "^4.18.2",
