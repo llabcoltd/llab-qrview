@@ -9,10 +9,12 @@ const http = require('http');
 const BASE = 'http://localhost:3535';
 
 const TEST_DATA = {
-  bank: 'AGRIBANK',
-  account: 'STK: 0123456789',
-  amount: '230.000',
-  qrUrl: 'https://oxu.vn/pay/test123',
+  bankCode: 'MBBANK',
+  accountNo: '0123456789',
+  amount: 150000,           // VND integer — server auto-formats for display
+  addInfo: 'ORDER_TEST001', // embedded in QR, your backend matches on this
+  accountName: 'NGUYEN VAN A',
+  template: 'compact',
 };
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -170,15 +172,16 @@ async function testIndividualCommands() {
 }
 
 async function testFullPayment() {
-  section('6. Full /payment Sequence');
-  info(`Bank: ${TEST_DATA.bank}`);
-  info(`Account: ${TEST_DATA.account}`);
-  info(`Amount: ${TEST_DATA.amount}`);
-  info(`QR URL: ${TEST_DATA.qrUrl}`);
+  section('6. Full /payment Sequence (VietQR)');
+  info(`Bank:    ${TEST_DATA.bankCode}`);
+  info(`Account: ${TEST_DATA.accountNo}`);
+  info(`Amount:  ${TEST_DATA.amount.toLocaleString('vi-VN')} ₫`);
+  info(`Ref:     ${TEST_DATA.addInfo}`);
 
   const r = await post('/payment', TEST_DATA);
   if (r.body.success) {
     pass('Full payment sequence sent');
+    info(`VietQR URL: ${r.body.qrUrl}`);
     console.log(`    ${DIM('Sequence: ' + r.body.sequence.join(' → '))}`);
   } else {
     fail('Payment sequence failed', r.body.error);

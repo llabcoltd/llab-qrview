@@ -125,20 +125,50 @@ Base URL: `http://localhost:3535`
 | POST | `/payment-success` | — | Go to screen 2 (success) |
 | POST | `/uninstall` | — | Remove autostart registration |
 
-### `/payment` — full sequence in one call
+### `/payment` — full VietQR sequence in one call
 
 ```bash
 curl -X POST http://localhost:3535/payment \
   -H "Content-Type: application/json" \
   -d '{
-    "bank": "AGRIBANK",
-    "account": "0123456789",
-    "amount": "230.000",
-    "qrUrl": "https://oxu.vn/pay/abc123"
+    "bankCode": "MBBANK",
+    "accountNo": "0123456789",
+    "amount": 150000,
+    "addInfo": "ORDER_12345",
+    "accountName": "NGUYEN VAN A",
+    "template": "compact"
   }'
 ```
 
-This sends: `JUMP(1);` → `QBAR(0,url);` → `SET_TXT(0,bank);` → `SET_TXT(1,account);` → `SET_TXT(2,amount);` → `CLRF`
+| Field | Required | Description |
+|---|---|---|
+| `bankCode` | Yes | VietQR bank ID — e.g. `MBBANK`, `VCB`, `TCB`, `AGRIBANK` |
+| `accountNo` | Yes | Receiver account number |
+| `amount` | Yes | Amount in VND as integer — e.g. `150000` |
+| `addInfo` | Yes | Payment reference embedded in QR — e.g. `ORDER_12345`. Your backend matches incoming transfers on this. |
+| `accountName` | No | Recipient name shown inside the QR image |
+| `template` | No | QR image style: `compact` (default), `compact2`, `qr_only`, `print` |
+
+The server builds this VietQR URL automatically:
+```
+https://img.vietqr.io/image/MBBANK-0123456789-compact.png?amount=150000&addInfo=ORDER_12345&accountName=NGUYEN+VAN+A
+```
+
+Then sends: `JUMP(1);` → `QBAR(0,<vietqr_url>);` → `SET_TXT(0,MBBANK);` → `SET_TXT(1,STK: 0123456789);` → `SET_TXT(2,150.000 ₫);` → `CLRF`
+
+The `addInfo` reference is invisible to the customer but gets embedded in their transfer note when they scan and pay — use it to match confirmed payments in your backend.
+
+**Manual override** — pass `qrUrl` directly if you built the URL yourself:
+```bash
+curl -X POST http://localhost:3535/payment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "qrUrl": "https://img.vietqr.io/image/...",
+    "bank": "MBBANK",
+    "account": "0123456789",
+    "amountDisplay": "150.000 ₫"
+  }'
+```
 
 ---
 

@@ -96,6 +96,18 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 const ok = (r, cmd) => r.json({ success: true, command: cmd });
 const fail = (r, e, s = 500) => r.status(s).json({ success: false, error: e.message });
 
+// ── VietQR helpers ────────────────────────────────────────────────────────────
+function buildVietQRUrl(bankCode, accountNo, amount, addInfo, accountName, template = 'compact') {
+  const base = `https://img.vietqr.io/image/${bankCode}-${accountNo}-${template}.png`;
+  const params = new URLSearchParams({ amount: String(amount), addInfo });
+  if (accountName) params.set('accountName', accountName);
+  return `${base}?${params.toString()}`;
+}
+
+function formatVND(amount) {
+  return Number(amount).toLocaleString('vi-VN') + ' ₫';
+}
+
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -168,13 +180,43 @@ app.post('/reset', async (_, res) => { try { await send('JUMP(0);'); ok(res, 'JU
 app.post('/payment-success', async (_, res) => { try { await send('JUMP(2);'); ok(res, 'JUMP(2);'); } catch (e) { fail(res, e); } });
 
 app.post('/payment', async (req, res) => {
-  const { bank, account, amount, qrUrl } = req.body;
-  if (!bank || !account || !amount || !qrUrl)
-    return res.status(400).json({ error: 'bank, account, amount, qrUrl required' });
+  // bankCode   — VietQR bank ID, e.g. "MBBANK", "VCB", "TCB"
+  // accountNo  — receiver account number
+  // amount     — integer in VND, e.g. 150000
+  // addInfo    — payment reference embedded in QR, e.g. "ORDER_12345"
+  // accountName — optional, shown inside QR image
+  // template   — optional QR image style: "compact" (default) | "compact2" | "qr_only" | "print"
+  // qrUrl      — optional override: skip VietQR URL generation and use this directly
+  const { bankCode, accountNo, amount, addInfo, accountName, template, qrUrl } = req.body;
+
+  if (qrUrl) {
+    // manual override — caller built the URL themselves
+    const { bank, account, amountDisplay } = req.body;
+    if (!bank || !account || !amountDisplay)
+      return res.status(400).json({ error: 'when using qrUrl, bank, account, amountDisplay are required' });
+    try {
+      const seq = [`JUMP(1);`, `QBAR(0,${qrUrl});`, `SET_TXT(0,${bank});`, `SET_TXT(1,STK: ${account});`, `SET_TXT(2,${amountDisplay});`, `CLRF`];
+      for (const cmd of seq) { await send(cmd); await wait(100); }
+      return res.json({ success: true, qrUrl, sequence: seq });
+    } catch (e) { return fail(res, e); }
+  }
+
+  if (!bankCode || !accountNo || !amount || !addInfo)
+    return res.status(400).json({ error: 'bankCode, accountNo, amount, addInfo are required' });
+
   try {
-    const seq = [`JUMP(1);`, `QBAR(0,${qrUrl});`, `SET_TXT(0,${bank});`, `SET_TXT(1,${account});`, `SET_TXT(2,${amount});`, `CLRF`];
+    const url = buildVietQRUrl(bankCode, accountNo, amount, addInfo, accountName, template);
+    const amountDisplay = formatVND(amount);
+    const seq = [
+      `JUMP(1);`,
+      `QBAR(0,${url});`,
+      `SET_TXT(0,${bankCode});`,
+      `SET_TXT(1,STK: ${accountNo});`,
+      `SET_TXT(2,${amountDisplay});`,
+      `CLRF`
+    ];
     for (const cmd of seq) { await send(cmd); await wait(100); }
-    res.json({ success: true, sequence: seq });
+    res.json({ success: true, qrUrl: url, sequence: seq });
   } catch (e) { fail(res, e); }
 });
 
