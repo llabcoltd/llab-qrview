@@ -8,13 +8,20 @@ const http = require('http');
 
 const BASE = 'http://localhost:3535';
 
+// Sample raw EMVCo QR string (this is a test value — replace with one from your backend)
+const SAMPLE_QR_CODE = '00020101021238560010A000000727012600069704220113012345678901520400005303704540615000055802VN62180814ORDER_TEST0016304ABCD';
+
 const TEST_DATA = {
+  // /payment endpoint — uses raw EMVCo QR string from VietQR generate API
+  qrCode: SAMPLE_QR_CODE,
   bankCode: 'MBBANK',
-  accountNo: '0123456789',
+  maskedAccountNo: '****6789',
   amount: 150000,           // VND integer — server auto-formats for display
-  addInfo: 'ORDER_TEST001', // embedded in QR, your backend matches on this
-  accountName: 'NGUYEN VAN A',
-  template: 'compact',
+
+  // Individual command tests
+  sampleQrCode: SAMPLE_QR_CODE,
+  bankName: 'MBBANK',
+  accountDisplay: '****6789',
 };
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -151,16 +158,16 @@ async function testIndividualCommands() {
   await post('/jump/1');
   await wait(300);
 
-  let r = await post('/qbar', { url: TEST_DATA.qrUrl });
-  r.body.success ? pass('QBAR — QR code displayed', TEST_DATA.qrUrl) : fail('QBAR failed', r.body.error);
+  let r = await post('/qbar', { url: TEST_DATA.sampleQrCode });
+  r.body.success ? pass('QBAR — QR code displayed') : fail('QBAR failed', r.body.error);
   await wait(500);
 
-  r = await post('/settxt/bank', { name: TEST_DATA.bank });
-  r.body.success ? pass('SET_TXT(0) — bank name', TEST_DATA.bank) : fail('SET_TXT(0) failed', r.body.error);
+  r = await post('/settxt/bank', { name: TEST_DATA.bankName });
+  r.body.success ? pass('SET_TXT(0) — bank name', TEST_DATA.bankName) : fail('SET_TXT(0) failed', r.body.error);
   await wait(500);
 
-  r = await post('/settxt/account', { number: TEST_DATA.account });
-  r.body.success ? pass('SET_TXT(1) — account', TEST_DATA.account) : fail('SET_TXT(1) failed', r.body.error);
+  r = await post('/settxt/account', { number: TEST_DATA.accountDisplay });
+  r.body.success ? pass('SET_TXT(1) — account', TEST_DATA.accountDisplay) : fail('SET_TXT(1) failed', r.body.error);
   await wait(500);
 
   r = await post('/settxt/amount', { amount: TEST_DATA.amount });
@@ -172,16 +179,20 @@ async function testIndividualCommands() {
 }
 
 async function testFullPayment() {
-  section('6. Full /payment Sequence (VietQR)');
+  section('6. Full /payment Sequence (raw EMVCo QR)');
   info(`Bank:    ${TEST_DATA.bankCode}`);
-  info(`Account: ${TEST_DATA.accountNo}`);
+  info(`Account: ${TEST_DATA.maskedAccountNo}`);
   info(`Amount:  ${TEST_DATA.amount.toLocaleString('vi-VN')} ₫`);
-  info(`Ref:     ${TEST_DATA.addInfo}`);
+  info(`QR:      ${TEST_DATA.qrCode.slice(0, 40)}...`);
 
-  const r = await post('/payment', TEST_DATA);
+  const r = await post('/payment', {
+    qrCode: TEST_DATA.qrCode,
+    bankCode: TEST_DATA.bankCode,
+    maskedAccountNo: TEST_DATA.maskedAccountNo,
+    amount: TEST_DATA.amount,
+  });
   if (r.body.success) {
     pass('Full payment sequence sent');
-    info(`VietQR URL: ${r.body.qrUrl}`);
     console.log(`    ${DIM('Sequence: ' + r.body.sequence.join(' → '))}`);
   } else {
     fail('Payment sequence failed', r.body.error);
