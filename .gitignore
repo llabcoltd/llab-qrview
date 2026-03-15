@@ -1,1 +1,7 @@
 .DS_Store
+node_modules/
+
+# Built executables
+qrview-server-win.exe
+qrview-server-macos-arm64
+qrview-server-macos-x64
