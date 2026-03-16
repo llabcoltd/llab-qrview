@@ -178,7 +178,7 @@ app.post('/payment', async (req, res) => {
   // amount        — integer in VND, e.g. 150000
   const { qrCode, bankCode, maskedAccountNo, amount } = req.body;
 
-  if (!qrCode || !bankCode || !maskedAccountNo || !amount)
+  if (!qrCode || !bankCode || !maskedAccountNo || amount == null)
     return res.status(400).json({ error: 'qrCode, bankCode, maskedAccountNo, amount are required' });
 
   try {

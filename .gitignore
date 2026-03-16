@@ -7,3 +7,4 @@ qrview-server-macos-arm64
 qrview-server-macos-x64
 qrview-server-win.exe.zip
 releases/*
+/.idea/*
