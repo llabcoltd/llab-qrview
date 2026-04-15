@@ -119,6 +119,17 @@ app.get('/health', async (_, res) => {
   });
 });
 
+app.get('/logs', (req, res) => {
+  try {
+    if (!fs.existsSync(LOG)) return res.json({ success: true, content: '', logFile: LOG });
+    const lines = parseInt(req.query.lines, 10) || 200;
+    const raw = fs.readFileSync(LOG, 'utf-8');
+    const allLines = raw.split('\n');
+    const content = allLines.slice(-lines).join('\n');
+    res.json({ success: true, content, logFile: LOG, totalLines: allLines.length });
+  } catch (e) { fail(res, e); }
+});
+
 app.get('/ports', async (_, res) => {
   try { res.json({ success: true, ports: await listPorts() }); } catch (e) { fail(res, e); }
 });
