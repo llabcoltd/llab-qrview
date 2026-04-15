@@ -97,7 +97,7 @@ const ok = (r, cmd) => r.json({ success: true, command: cmd });
 const fail = (r, e, s = 500) => r.status(s).json({ success: false, error: e.message });
 
 function formatVND(amount) {
-  return Number(amount).toLocaleString('en-US') + ' VND';
+  return Number(amount).toLocaleString('vi-VN') + ' ₫';
 }
 
 const app = express();
@@ -172,10 +172,6 @@ app.post('/reset', async (_, res) => { try { await send('JUMP(0);'); ok(res, 'JU
 app.post('/payment-success', async (_, res) => { try { await send('JUMP(2);'); ok(res, 'JUMP(2);'); } catch (e) { fail(res, e); } });
 
 app.post('/payment', async (req, res) => {
-  // qrCode        — raw EMVCo QR string from VietQR generate API
-  // bankCode      — VietQR bank ID, e.g. "MBBANK", "VCB"
-  // maskedAccountNo — masked account number, e.g. "****6789"
-  // amount        — integer in VND, e.g. 150000
   const { qrCode, bankCode, maskedAccountNo, amount } = req.body;
 
   if (!qrCode || !bankCode || !maskedAccountNo || amount == null)
@@ -189,6 +185,7 @@ app.post('/payment', async (req, res) => {
       `SET_TXT(0,${bankCode});`,
       `SET_TXT(1,STK: ${maskedAccountNo});`,
       `SET_TXT(2,${amountDisplay});`,
+      `CLRF`,
     ];
     for (const cmd of seq) { await send(cmd); await wait(100); }
     res.json({ success: true, sequence: seq });
