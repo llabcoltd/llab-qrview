@@ -97,7 +97,7 @@ const ok = (r, cmd) => r.json({ success: true, command: cmd });
 const fail = (r, e, s = 500) => r.status(s).json({ success: false, error: e.message });
 
 function formatVND(amount) {
-  return Number(amount).toLocaleString('vi-VN') + ' ₫';
+  return Number(amount).toLocaleString('en-US') + ' VND';
 }
 
 const app = express();
@@ -189,7 +189,6 @@ app.post('/payment', async (req, res) => {
       `SET_TXT(0,${bankCode});`,
       `SET_TXT(1,STK: ${maskedAccountNo});`,
       `SET_TXT(2,${amountDisplay});`,
-      `CLRF`
     ];
     for (const cmd of seq) { await send(cmd); await wait(100); }
     res.json({ success: true, sequence: seq });
