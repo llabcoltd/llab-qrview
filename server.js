@@ -97,7 +97,7 @@ const ok = (r, cmd) => r.json({ success: true, command: cmd });
 const fail = (r, e, s = 500) => r.status(s).json({ success: false, error: e.message });
 
 function formatVND(amount) {
-  return Number(amount).toLocaleString('vi-VN');
+  return Number(amount).toLocaleString('en-US');
 }
 
 const app = express();
