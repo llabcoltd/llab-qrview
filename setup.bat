@@ -80,7 +80,7 @@ echo.
 echo [2/3] Starting agent...
 echo [%date% %time%] Starting binary >> "%LOG%"
 
-start "" /B "%INSTALL_DIR%\qrview-server.exe"
+powershell -NoProfile -Command "Start-Process -FilePath '%INSTALL_DIR%\qrview-server.exe' -WindowStyle Hidden"
 
 :: ── Verify ───────────────────────────────────────────────────────────────────
 echo.

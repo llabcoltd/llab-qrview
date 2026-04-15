@@ -70,7 +70,8 @@ async function scan() {
   try {
     const ports = await listPorts();
     log(`Scanning: ${ports.map(p => p.path).join(', ') || 'none'}`);
-    for (const p of ports) {
+    for (let i = ports.length - 1; i >= 0; i--) {
+      const p = ports[i];
       if (!(p.vendorId || /usb|com\d|ttyusb|ttyacm|usbserial/i.test(p.path))) continue;
       try { sp = await openPort(p.path); connectedPort = p.path; log(`Connected: ${p.path}`); break; }
       catch (e) { log(`Skip ${p.path}: ${e.message}`, 'WARN'); }

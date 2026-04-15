@@ -165,7 +165,7 @@ echo  [5/5] Starting QR-VIEW Agent...
 echo [%date% %time%] Step 5: Starting binary >> "%LOG%"
 echo [%date% %time%] Launching: %EXE_DEST% >> "%LOG%"
 
-start "" /B "%EXE_DEST%"
+powershell -NoProfile -Command "Start-Process -FilePath '%EXE_DEST%' -WindowStyle Hidden"
 
 :: Wait up to 10 seconds for health check
 echo [%date% %time%] Waiting for health check on port %PORT%... >> "%LOG%"
