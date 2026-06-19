@@ -172,6 +172,34 @@ curl -X POST http://localhost:3535/payment \
 
 ---
 
+## Idle sleep / auto-wake
+
+The QR-VIEW protocol has no native power command, so "sleep" is built in software
+from the documented commands: after the display sits idle (no commands sent) for
+**30 seconds**, the server dims the backlight to zero and returns to the home
+screen — `BL(0);` then `JUMP(0);`.
+
+The next command of any kind (`/payment`, `/qbar`, `/jump`, …) **auto-wakes** the
+screen first by restoring the last brightness (`BL(<level>);`), then runs. No manual
+wake call is needed. The idle countdown re-arms after every command.
+
+| Behaviour | Detail |
+|---|---|
+| Sleep after | 30 s idle (override with `QRVIEW_IDLE_SLEEP_MS`, in ms) |
+| Sleep action | `BL(0);` → `JUMP(0);` |
+| Wake | automatic on the next command — restores last brightness |
+| Restored brightness | last value set via `POST /brightness/:lvl` (>0), else `200` |
+| Disable | set `QRVIEW_IDLE_SLEEP_MS=0` |
+
+`GET /health` now also reports `asleep`, `idleSleepMs`, and `brightness`.
+
+```bash
+# Sleep after 10 seconds instead of 30
+QRVIEW_IDLE_SLEEP_MS=10000 ./qrview-server-macos-arm64
+```
+
+---
+
 ## Debugging
 
 **Check server status and which COM port is connected:**

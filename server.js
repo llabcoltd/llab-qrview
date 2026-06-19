@@ -30,6 +30,16 @@ const FLAG = path.join(os.homedir(), '.qrview_installed');
 const LOG = path.join(os.homedir(), 'qrview-server.log');
 const MOCK = process.env.QRVIEW_MOCK === '1';
 
+// ── Idle sleep ────────────────────────────────────────────────────────────────
+// The QR-VIEW protocol has no native sleep command, so "sleep" = backlight off
+// (BL(0);) + return to the home screen (JUMP(0);). Any device command auto-wakes
+// the screen by restoring the last brightness before running. Configurable via
+// QRVIEW_IDLE_SLEEP_MS (0 disables auto-sleep).
+const IDLE_SLEEP_MS = process.env.QRVIEW_IDLE_SLEEP_MS != null
+  ? parseInt(process.env.QRVIEW_IDLE_SLEEP_MS, 10)
+  : 30000;
+const DEFAULT_BRIGHTNESS = 200;
+
 function log(msg, lvl = 'INFO') {
   const line = `[${new Date().toISOString()}] [${lvl}] ${msg}`;
   console.log(line);
@@ -40,6 +50,7 @@ function log(msg, lvl = 'INFO') {
 }
 
 let sp = null, connectedPort = null, connecting = false, retryTimer = null;
+let asleep = false, idleTimer = null, currentBrightness = DEFAULT_BRIGHTNESS;
 
 // ── Mock-safe port list ───────────────────────────────────────────────────────
 const listPorts = () => {
@@ -52,8 +63,8 @@ function openPort(p) {
     const s = new SerialPort({ path: p, baudRate: BAUD, autoOpen: false });
     s.open(err => {
       if (err) return rej(err);
-      s.on('error', e => { log(`Serial error: ${e.message}`, 'ERROR'); sp = null; connectedPort = null; retry(); });
-      s.on('close', () => { log(`Port ${p} closed`); sp = null; connectedPort = null; retry(); });
+      s.on('error', e => { log(`Serial error: ${e.message}`, 'ERROR'); sp = null; connectedPort = null; resetSleep(); retry(); });
+      s.on('close', () => { log(`Port ${p} closed`); sp = null; connectedPort = null; resetSleep(); retry(); });
       res(s);
     });
   });
@@ -73,7 +84,7 @@ async function scan() {
     for (let i = ports.length - 1; i >= 0; i--) {
       const p = ports[i];
       if (!(p.vendorId || /usb|com\d|ttyusb|ttyacm|usbserial/i.test(p.path))) continue;
-      try { sp = await openPort(p.path); connectedPort = p.path; log(`Connected: ${p.path}`); break; }
+      try { sp = await openPort(p.path); connectedPort = p.path; log(`Connected: ${p.path}`); scheduleSleep(); break; }
       catch (e) { log(`Skip ${p.path}: ${e.message}`, 'WARN'); }
     }
     if (!connectedPort) { log('No device — retry in 5s', 'WARN'); retry(); }
@@ -81,8 +92,8 @@ async function scan() {
   finally { connecting = false; }
 }
 
-// ── Mock-safe send ────────────────────────────────────────────────────────────
-function send(cmd) {
+// ── Mock-safe raw write ─────────────────────────────────────────────────────
+function writeCmd(cmd) {
   return new Promise((res, rej) => {
     if (MOCK) {
       log(`[MOCK] → ${cmd}`);
@@ -91,6 +102,51 @@ function send(cmd) {
     if (!sp || !sp.isOpen) return rej(new Error('QR-VIEW not connected'));
     sp.write(`${cmd}\r\n`, 'ascii', err => { if (err) return rej(err); log(`→ ${cmd}`); res(); });
   });
+}
+
+// ── Idle sleep / auto-wake ───────────────────────────────────────────────────
+// Re-arm the idle countdown after every user command.
+function scheduleSleep() {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  if (IDLE_SLEEP_MS > 0) {
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      goToSleep().catch(e => log(`Sleep failed: ${e.message}`, 'ERROR'));
+    }, IDLE_SLEEP_MS);
+  }
+}
+
+// Cancel any pending sleep and forget the asleep state (used when the port drops).
+function resetSleep() {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  asleep = false;
+}
+
+// Dim the backlight and return to the home screen.
+async function goToSleep() {
+  if (asleep) return;
+  if (!MOCK && !(sp && sp.isOpen)) return;   // nothing connected — nothing to sleep
+  asleep = true;
+  log(`Idle ${IDLE_SLEEP_MS}ms — sleeping display (BL(0); JUMP(0);)`);
+  await writeCmd('BL(0);');
+  await writeCmd('JUMP(0);');
+}
+
+// Restore the last brightness so the next command is visible.
+async function wake() {
+  if (!asleep) return;
+  asleep = false;
+  log(`Waking display (BL(${currentBrightness});)`);
+  await writeCmd(`BL(${currentBrightness});`);
+}
+
+// ── User-level send ──────────────────────────────────────────────────────────
+// Every API-issued command goes through here: auto-wake first, then re-arm the
+// idle countdown. Internal sleep/wake writes use writeCmd() to avoid recursion.
+async function send(cmd) {
+  await wake();
+  await writeCmd(cmd);
+  scheduleSleep();
 }
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -110,11 +166,12 @@ app.get('/health', async (_, res) => {
   const ports = await listPorts().catch(() => []);
   res.json({
     status: 'ok', mock: MOCK, os: os.platform(), arch: os.arch(),
-    serverVersion: '1.0.0', uptime: Math.floor(process.uptime()),
+    serverVersion: '1.1.0', uptime: Math.floor(process.uptime()),
     isConnected: MOCK ? false : !!(sp && sp.isOpen),
     connectedPort: MOCK ? null : connectedPort,
     availablePorts: ports.map(p => ({ path: p.path, vendorId: p.vendorId, manufacturer: p.manufacturer })),
     autoStartRegistered: fs.existsSync(FLAG),
+    asleep, idleSleepMs: IDLE_SLEEP_MS, brightness: currentBrightness,
     logFile: LOG
   });
 });
@@ -137,13 +194,13 @@ app.get('/ports', async (_, res) => {
 app.post('/connect', async (req, res) => {
   if (MOCK) return res.json({ success: true, port: 'mock', mock: true });
   const { port } = req.body; if (!port) return res.status(400).json({ error: 'port required' });
-  try { if (sp && sp.isOpen) sp.close(); sp = await openPort(port); connectedPort = port; res.json({ success: true, port }); }
+  try { if (sp && sp.isOpen) sp.close(); sp = await openPort(port); connectedPort = port; resetSleep(); scheduleSleep(); res.json({ success: true, port }); }
   catch (e) { fail(res, e); }
 });
 
 app.post('/disconnect', (_, res) => {
   if (MOCK) return res.json({ success: true, mock: true });
-  if (sp && sp.isOpen) { sp.close(); res.json({ success: true }); }
+  if (sp && sp.isOpen) { resetSleep(); sp.close(); res.json({ success: true }); }
   else res.json({ success: false, error: 'No port open' });
 });
 
@@ -176,7 +233,7 @@ app.post('/settxt/amount', async (req, res) => {
 app.post('/brightness/:lvl', async (req, res) => {
   const lvl = parseInt(req.params.lvl, 10);
   if (isNaN(lvl) || lvl < 0 || lvl > 255) return res.status(400).json({ error: 'level must be 0-255' });
-  try { await send(`BL(${lvl});`); ok(res, `BL(${lvl});`); } catch (e) { fail(res, e); }
+  try { await send(`BL(${lvl});`); if (lvl > 0) currentBrightness = lvl; ok(res, `BL(${lvl});`); } catch (e) { fail(res, e); }
 });
 
 app.post('/clear', async (_, res) => { try { await send('CLRF'); ok(res, 'CLRF'); } catch (e) { fail(res, e); } });
@@ -210,9 +267,10 @@ app.post('/uninstall', (_, res) => {
 });
 
 async function main() {
-  log(`QR-VIEW Server v1.0.0 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
+  log(`QR-VIEW Server v1.1.0 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
   if (MOCK) {
     log('⚠️  MOCK MODE — serial port fully bypassed, all commands succeed silently');
+    scheduleSleep();
   } else {
     if (!fs.existsSync(FLAG)) {
       log('First run — registering autostart...');
