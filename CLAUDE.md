@@ -55,16 +55,40 @@ command "succeeds" and is logged, so all behaviour is testable without hardware.
 ### Device command layer — three levels, do not collapse them
 
 1. `writeCmd(cmd)` — raw write of one command to the port (or mock log).
-2. `wake()` / `goToSleep()` / `scheduleSleep()` / `resetSleep()` — idle-sleep machinery,
-   built **only** from documented commands because the protocol has no power command.
-   Sleep = `BL(0);` then `JUMP(0);`; wake = `BL(<lastBrightness>);`. These call
-   `writeCmd` directly to avoid recursion.
+2. `wake()` / `goToSleep()` / `scheduleSleep()` / `resetSleep()` / `expirePaymentScreen()`
+   — idle-sleep machinery, built **only** from documented commands because the protocol
+   has no power command. Sleep = `BL(0);` **and nothing else**; wake =
+   `BL(<lastBrightness>);`. These call `writeCmd` directly to avoid recursion.
 3. `send(cmd)` — the user-level entry point every HTTP handler uses: auto-wakes the
-   display, writes, then re-arms the idle countdown.
+   display, writes, records the screen if the command was a `JUMP`, then re-arms the
+   idle countdown.
 
 **Invariant:** HTTP handlers call `send()`; the sleep/wake internals call `writeCmd()`.
 Routing a handler through `writeCmd` (or sleep logic through `send`) breaks auto-wake or
 causes recursion.
+
+**Sleep must not change screens.** It used to also `JUMP(0);` while `wake()` only
+restored brightness — so any single command after a sleep lit up the *home* screen
+instead of the QR that was there, and only `/payment` recovered because its sequence
+re-issues `JUMP(1)`. Keeping sleep to backlight-only is what makes wake a pure restore.
+`expirePaymentScreen()` is the deliberate exception: a much longer timer that sends the
+payment screen home so a customer's QR doesn't sit on the counter — it uses `writeCmd`
+so a sleeping display stays dark.
+
+**Screen tracking:** `send()` parses `JUMP(n)` to maintain `currentScreen`, which
+selects the timeout (`paymentIdleMs` on screen 1, `idleSleepMs` otherwise). A new route
+that changes screens by any means other than a `JUMP(n);` string passed to `send()` must
+update `currentScreen` itself, or it will get the wrong timeout.
+
+### Timing config
+
+`CONFIG` is resolved once at boot: **env var → `~/.qrview_config.json` → `CONFIG_DEFAULTS`**.
+The file exists because `autostart.js` registers a bare exe path in the Windows HKCU Run
+key with **no environment** — on a shop PC env vars are unreachable, so without the file
+every timing change would need a rebuild and a reinstall on every machine. Non-integer or
+negative values are rejected with a `WARN` and fall back to the default (a `NaN` timeout
+fires immediately, which would silently mean "never sleep off"). Values are surfaced in
+`/health` under `config`.
 
 ### Device protocol (from the PDF)
 

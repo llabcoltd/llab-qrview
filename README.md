@@ -175,27 +175,57 @@ curl -X POST http://localhost:3535/payment \
 ## Idle sleep / auto-wake
 
 The QR-VIEW protocol has no native power command, so "sleep" is built in software
-from the documented commands: after the display sits idle (no commands sent) for
-**30 seconds**, the server dims the backlight to zero and returns to the home
-screen — `BL(0);` then `JUMP(0);`.
+from the documented commands: after the display sits idle (no commands sent) the
+server dims the backlight to zero — `BL(0);`. **Sleep does not change screens.**
+Whatever was on the display stays there, so waking is a pure brightness restore.
+
+The timeout depends on which screen is showing, because they have opposite needs:
+
+| Screen | Sleeps after | Why |
+|---|---|---|
+| `0` home / `2` success | **30 s** | nothing to read — dim it fast |
+| `1` payment QR | **180 s** | has to outlast a real transfer: open app → auth → scan → confirm → OTP |
+
+The payment screen additionally **expires** after **10 minutes** and jumps home
+(`JUMP(0);`), so a customer's QR isn't left sitting on the counter. Expiry works
+whether or not the display is already asleep, and doesn't light it back up.
 
 The next command of any kind (`/payment`, `/qbar`, `/jump`, …) **auto-wakes** the
 screen first by restoring the last brightness (`BL(<level>);`), then runs. No manual
-wake call is needed. The idle countdown re-arms after every command.
+wake call is needed. The countdowns re-arm after every command.
 
-| Behaviour | Detail |
-|---|---|
-| Sleep after | 30 s idle (override with `QRVIEW_IDLE_SLEEP_MS`, in ms) |
-| Sleep action | `BL(0);` → `JUMP(0);` |
-| Wake | automatic on the next command — restores last brightness |
-| Restored brightness | last value set via `POST /brightness/:lvl` (>0), else `200` |
-| Disable | set `QRVIEW_IDLE_SLEEP_MS=0` |
+### Tuning
 
-`GET /health` now also reports `asleep`, `idleSleepMs`, and `brightness`.
+Resolution order per key: **environment variable → `~/.qrview_config.json` → default.**
+
+On Windows, auto-start registers a bare exe path in the HKCU `Run` key with no
+environment, so **on a shop PC the config file is the only way to retune** without
+rebuilding the binary. Create it by hand:
+
+```json
+{
+  "idleSleepMs": 30000,
+  "paymentIdleMs": 180000,
+  "paymentExpireMs": 600000,
+  "brightness": 200
+}
+```
+
+| Key | Env var | Default | `0` means |
+|---|---|---|---|
+| `idleSleepMs` | `QRVIEW_IDLE_SLEEP_MS` | `30000` | never sleep the home screen |
+| `paymentIdleMs` | `QRVIEW_PAYMENT_IDLE_MS` | `180000` | never sleep the payment screen |
+| `paymentExpireMs` | `QRVIEW_PAYMENT_EXPIRE_MS` | `600000` | never expire the payment screen |
+| `brightness` | `QRVIEW_BRIGHTNESS` | `200` | — (valid range 1–255) |
+
+A value that isn't a non-negative integer is ignored with a `WARN` in the log and
+the default is used. `GET /health` reports the resolved `config`, the `configFile`
+path, plus `asleep`, `screen`, and `brightness` — check there first when a shop PC
+isn't behaving like you expect.
 
 ```bash
-# Sleep after 10 seconds instead of 30
-QRVIEW_IDLE_SLEEP_MS=10000 ./qrview-server-macos-arm64
+# Sleep the payment screen after 10 seconds instead of 180 (local testing)
+QRVIEW_PAYMENT_IDLE_MS=10000 ./qrview-server-macos-arm64
 ```
 
 ---

@@ -28,16 +28,10 @@ try {
 const PORT = 3535, BAUD = 115200;
 const FLAG = path.join(os.homedir(), '.qrview_installed');
 const LOG = path.join(os.homedir(), 'qrview-server.log');
+const CONFIG_FILE = path.join(os.homedir(), '.qrview_config.json');
 const MOCK = process.env.QRVIEW_MOCK === '1';
 
-// ── Idle sleep ────────────────────────────────────────────────────────────────
-// The QR-VIEW protocol has no native sleep command, so "sleep" = backlight off
-// (BL(0);) + return to the home screen (JUMP(0);). Any device command auto-wakes
-// the screen by restoring the last brightness before running. Configurable via
-// QRVIEW_IDLE_SLEEP_MS (0 disables auto-sleep).
-const IDLE_SLEEP_MS = process.env.QRVIEW_IDLE_SLEEP_MS != null
-  ? parseInt(process.env.QRVIEW_IDLE_SLEEP_MS, 10)
-  : 30000;
+const HOME_SCREEN = 0, PAYMENT_SCREEN = 1;
 const DEFAULT_BRIGHTNESS = 200;
 
 function log(msg, lvl = 'INFO') {
@@ -49,8 +43,73 @@ function log(msg, lvl = 'INFO') {
   } catch (_) { }
 }
 
+// ── Timing config ─────────────────────────────────────────────────────────────
+// Resolution order per key: env var > ~/.qrview_config.json > default. The file
+// matters more than it looks: autostart.js registers a bare exe path in the
+// Windows HKCU Run key with no environment, so on a shop PC the env vars are
+// unreachable and the file is the only way to retune without a rebuild.
+const CONFIG_DEFAULTS = {
+  idleSleepMs: 30000,      // home/success screen -> backlight off
+  paymentIdleMs: 180000,   // payment screen -> backlight off
+  paymentExpireMs: 600000, // payment screen -> back to home (clears a stale QR)
+};
+const ENV_KEYS = {
+  idleSleepMs: 'QRVIEW_IDLE_SLEEP_MS',
+  paymentIdleMs: 'QRVIEW_PAYMENT_IDLE_MS',
+  paymentExpireMs: 'QRVIEW_PAYMENT_EXPIRE_MS',
+};
+
+function readConfigFile() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) return {};
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (e) {
+    log(`Config ${CONFIG_FILE} unreadable (${e.message}) — using defaults`, 'WARN');
+    return {};
+  }
+}
+
+// A key is only overridden by a value that parses to a non-negative integer;
+// anything else falls through to the default rather than silently becoming NaN
+// (NaN would make setTimeout fire immediately — i.e. never sleep off).
+function loadConfig() {
+  const file = readConfigFile();
+  const cfg = {};
+  for (const [key, fallback] of Object.entries(CONFIG_DEFAULTS)) {
+    const raw = process.env[ENV_KEYS[key]] != null ? process.env[ENV_KEYS[key]] : file[key];
+    const n = raw != null ? parseInt(raw, 10) : NaN;
+    if (raw != null && !(Number.isFinite(n) && n >= 0)) {
+      log(`Config ${key}="${raw}" is not a non-negative integer — using ${fallback}`, 'WARN');
+    }
+    cfg[key] = Number.isFinite(n) && n >= 0 ? n : fallback;
+  }
+  const b = parseInt(process.env.QRVIEW_BRIGHTNESS != null ? process.env.QRVIEW_BRIGHTNESS : file.brightness, 10);
+  cfg.brightness = Number.isFinite(b) && b >= 1 && b <= 255 ? b : DEFAULT_BRIGHTNESS;
+  return cfg;
+}
+
+const CONFIG = loadConfig();
+
+// ── Idle sleep ────────────────────────────────────────────────────────────────
+// The QR-VIEW protocol has no native sleep command, so "sleep" = backlight off
+// (BL(0);). Sleep deliberately does NOT change screens — wake is then a pure
+// backlight restore and whatever the operator put on screen survives. (It used
+// to JUMP(0) on sleep while wake() only restored brightness, so a woken display
+// showed the logo instead of the QR that was there before.)
+//
+// Two tiers, because the screens have opposite needs: home/logo should dim fast,
+// but the payment screen has to outlast a real bank transfer — open app -> auth
+// -> scan -> confirm -> OTP is routinely 60-120s, and the old flat 30s killed
+// the QR mid-transfer. A separate expiry then sends the payment screen home so a
+// customer's QR isn't still sitting on the counter hours later.
+//
+// Any value of 0 disables that timer.
+
 let sp = null, connectedPort = null, connecting = false, retryTimer = null;
-let asleep = false, idleTimer = null, currentBrightness = DEFAULT_BRIGHTNESS;
+let asleep = false, idleTimer = null, expireTimer = null;
+let currentBrightness = CONFIG.brightness;
+let currentScreen = HOME_SCREEN;
 
 // ── Mock-safe port list ───────────────────────────────────────────────────────
 const listPorts = () => {
@@ -105,31 +164,47 @@ function writeCmd(cmd) {
 }
 
 // ── Idle sleep / auto-wake ───────────────────────────────────────────────────
-// Re-arm the idle countdown after every user command.
+// Re-arm the countdowns after every user command. Which timeout applies depends
+// on the screen we're currently showing.
 function scheduleSleep() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-  if (IDLE_SLEEP_MS > 0) {
+  if (expireTimer) { clearTimeout(expireTimer); expireTimer = null; }
+
+  const onPayment = currentScreen === PAYMENT_SCREEN;
+  const sleepAfter = onPayment ? CONFIG.paymentIdleMs : CONFIG.idleSleepMs;
+
+  if (sleepAfter > 0) {
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      goToSleep().catch(e => log(`Sleep failed: ${e.message}`, 'ERROR'));
-    }, IDLE_SLEEP_MS);
+      goToSleep(sleepAfter).catch(e => log(`Sleep failed: ${e.message}`, 'ERROR'));
+    }, sleepAfter);
+  }
+
+  if (onPayment && CONFIG.paymentExpireMs > 0) {
+    expireTimer = setTimeout(() => {
+      expireTimer = null;
+      expirePaymentScreen().catch(e => log(`Payment expiry failed: ${e.message}`, 'ERROR'));
+    }, CONFIG.paymentExpireMs);
   }
 }
 
-// Cancel any pending sleep and forget the asleep state (used when the port drops).
+// Cancel any pending timers and forget the display state (used when the port
+// drops or a new one is opened — the device comes up on the home screen).
 function resetSleep() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  if (expireTimer) { clearTimeout(expireTimer); expireTimer = null; }
   asleep = false;
+  currentScreen = HOME_SCREEN;
 }
 
-// Dim the backlight and return to the home screen.
-async function goToSleep() {
+// Dim the backlight. The screen is left exactly as it was so wake() can restore
+// it with nothing more than a brightness command.
+async function goToSleep(after) {
   if (asleep) return;
   if (!MOCK && !(sp && sp.isOpen)) return;   // nothing connected — nothing to sleep
   asleep = true;
-  log(`Idle ${IDLE_SLEEP_MS}ms — sleeping display (BL(0); JUMP(0);)`);
+  log(`Idle ${after}ms on screen ${currentScreen} — sleeping display (BL(0);)`);
   await writeCmd('BL(0);');
-  await writeCmd('JUMP(0);');
 }
 
 // Restore the last brightness so the next command is visible.
@@ -140,12 +215,26 @@ async function wake() {
   await writeCmd(`BL(${currentBrightness});`);
 }
 
+// A payment QR is customer data — don't leave it on the counter indefinitely.
+// Uses writeCmd so an already-sleeping display goes home while staying dark
+// rather than lighting itself up unprompted.
+async function expirePaymentScreen() {
+  if (currentScreen !== PAYMENT_SCREEN) return;
+  if (!MOCK && !(sp && sp.isOpen)) return;
+  log(`Payment screen up ${CONFIG.paymentExpireMs}ms — returning home (JUMP(${HOME_SCREEN});)`);
+  currentScreen = HOME_SCREEN;
+  await writeCmd(`JUMP(${HOME_SCREEN});`);
+}
+
 // ── User-level send ──────────────────────────────────────────────────────────
-// Every API-issued command goes through here: auto-wake first, then re-arm the
-// idle countdown. Internal sleep/wake writes use writeCmd() to avoid recursion.
+// Every API-issued command goes through here: auto-wake first, track the screen
+// the command leaves us on, then re-arm the idle countdown. Internal sleep/wake
+// writes use writeCmd() to avoid recursion.
 async function send(cmd) {
   await wake();
   await writeCmd(cmd);
+  const jump = /^JUMP\((\d)\)/.exec(cmd);
+  if (jump) currentScreen = parseInt(jump[1], 10);
   scheduleSleep();
 }
 
@@ -166,12 +255,13 @@ app.get('/health', async (_, res) => {
   const ports = await listPorts().catch(() => []);
   res.json({
     status: 'ok', mock: MOCK, os: os.platform(), arch: os.arch(),
-    serverVersion: '1.1.0', uptime: Math.floor(process.uptime()),
+    serverVersion: '1.2.0', uptime: Math.floor(process.uptime()),
     isConnected: MOCK ? false : !!(sp && sp.isOpen),
     connectedPort: MOCK ? null : connectedPort,
     availablePorts: ports.map(p => ({ path: p.path, vendorId: p.vendorId, manufacturer: p.manufacturer })),
     autoStartRegistered: fs.existsSync(FLAG),
-    asleep, idleSleepMs: IDLE_SLEEP_MS, brightness: currentBrightness,
+    asleep, screen: currentScreen, brightness: currentBrightness,
+    config: CONFIG, configFile: CONFIG_FILE,
     logFile: LOG
   });
 });
@@ -267,7 +357,8 @@ app.post('/uninstall', (_, res) => {
 });
 
 async function main() {
-  log(`QR-VIEW Server v1.1.0 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
+  log(`QR-VIEW Server v1.2.0 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
+  log(`Timing: idle=${CONFIG.idleSleepMs}ms payment=${CONFIG.paymentIdleMs}ms expire=${CONFIG.paymentExpireMs}ms brightness=${CONFIG.brightness} (${fs.existsSync(CONFIG_FILE) ? CONFIG_FILE : 'defaults'})`);
   if (MOCK) {
     log('⚠️  MOCK MODE — serial port fully bypassed, all commands succeed silently');
     scheduleSleep();
