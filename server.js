@@ -122,11 +122,20 @@ function openPort(p) {
     const s = new SerialPort({ path: p, baudRate: BAUD, autoOpen: false });
     s.open(err => {
       if (err) return rej(err);
-      s.on('error', e => { log(`Serial error: ${e.message}`, 'ERROR'); sp = null; connectedPort = null; resetSleep(); retry(); });
-      s.on('close', () => { log(`Port ${p} closed`); sp = null; connectedPort = null; resetSleep(); retry(); });
+      s.on('error', e => dropPort(s, `Serial error: ${e.message}`, 'ERROR'));
+      s.on('close', () => dropPort(s, `Port ${p} closed`));
       res(s);
     });
   });
+}
+
+// Forget a dead handle and rescan. Guarded on `sp === s` so a late event from an
+// old handle (e.g. after /connect swapped ports) can't null the new connection.
+function dropPort(s, why, level) {
+  if (sp !== s) return;
+  log(why, level);
+  sp = null; connectedPort = null; resetSleep(); retry();
+  if (s.isOpen) s.close(() => {});
 }
 
 function retry() {
@@ -159,7 +168,13 @@ function writeCmd(cmd) {
       return res();
     }
     if (!sp || !sp.isOpen) return rej(new Error('QR-VIEW not connected'));
-    sp.write(`${cmd}\r\n`, 'ascii', err => { if (err) return rej(err); log(`→ ${cmd}`); res(); });
+    const s = sp;
+    s.write(`${cmd}\r\n`, 'ascii', err => {
+      // Windows: USB device vanished under the open handle (selective suspend, sleep,
+      // replug) — the port emits no error/close, so without this it stays dead forever.
+      if (err) { dropPort(s, `Write failed (${cmd}): ${err.message} — reconnecting`, 'ERROR'); return rej(err); }
+      log(`→ ${cmd}`); res();
+    });
   });
 }
 
@@ -273,6 +288,8 @@ app.get('/logs', (req, res) => {
     const raw = fs.readFileSync(LOG, 'utf-8');
     const allLines = raw.split('\n');
     const content = allLines.slice(-lines).join('\n');
+    // Plain text for the dashboard's "view log" link, which opens this in a browser tab.
+    if (req.query.format === 'text') return res.type('text/plain; charset=utf-8').send(content);
     res.json({ success: true, content, logFile: LOG, totalLines: allLines.length });
   } catch (e) { fail(res, e); }
 });
