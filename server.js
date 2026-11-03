@@ -270,7 +270,7 @@ app.get('/health', async (_, res) => {
   const ports = await listPorts().catch(() => []);
   res.json({
     status: 'ok', mock: MOCK, os: os.platform(), arch: os.arch(),
-    serverVersion: '1.2.0', uptime: Math.floor(process.uptime()),
+    serverVersion: '1.2.1', uptime: Math.floor(process.uptime()),
     isConnected: MOCK ? false : !!(sp && sp.isOpen),
     connectedPort: MOCK ? null : connectedPort,
     availablePorts: ports.map(p => ({ path: p.path, vendorId: p.vendorId, manufacturer: p.manufacturer })),
@@ -374,7 +374,7 @@ app.post('/uninstall', (_, res) => {
 });
 
 async function main() {
-  log(`QR-VIEW Server v1.2.0 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
+  log(`QR-VIEW Server v1.2.1 | ${os.platform()} ${os.arch()} | Node: ${process.version}`);
   log(`Timing: idle=${CONFIG.idleSleepMs}ms payment=${CONFIG.paymentIdleMs}ms expire=${CONFIG.paymentExpireMs}ms brightness=${CONFIG.brightness} (${fs.existsSync(CONFIG_FILE) ? CONFIG_FILE : 'defaults'})`);
   if (MOCK) {
     log('⚠️  MOCK MODE — serial port fully bypassed, all commands succeed silently');
