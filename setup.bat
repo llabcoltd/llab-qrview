@@ -5,16 +5,7 @@ setlocal enabledelayedexpansion
 set LOG=%USERPROFILE%\qrview-setup.log
 echo [%date% %time%] Setup started > "%LOG%"
 
-:: ── Elevation check: are we already admin? ───────────────────────────────────
-whoami /groups | find "S-1-16-12288" >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [%date% %time%] Requesting admin elevation... >> "%LOG%"
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
-)
-
-echo [%date% %time%] Running as administrator >> "%LOG%"
+:: No admin: auto-start is per-user (HKCU Run + %APPDATA%). Elevating installs it for whoever typed the admin password, not the user who logs in.
 
 set INSTALL_DIR=%APPDATA%\QRViewAgent
 set PORT=3535

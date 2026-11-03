@@ -17,16 +17,7 @@ set BINARY_URL=https://github.com/llabcoltd/llab-qrview/releases/latest/download
 
 echo [%date% %time%] Setup/Update started > "%LOG%"
 
-:: ── Elevation check ──────────────────────────────────────────────────────────
-whoami /groups | find "S-1-16-12288" >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [%date% %time%] Requesting admin elevation... >> "%LOG%"
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
-)
-
-echo [%date% %time%] Running as administrator >> "%LOG%"
+:: No admin: auto-start is per-user (HKCU Run + %APPDATA%). Elevating installs it for whoever typed the admin password, not the user who logs in.
 
 echo.
 echo  ==========================================
@@ -77,7 +68,7 @@ if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 curl -L --progress-bar "%BINARY_URL%" -o "%EXE_DEST%" >> "%LOG%" 2>&1
 if %errorLevel% neq 0 (
-    echo  [ERROR] Download failed. Check your internet connection.
+    echo  [ERROR] Download failed. Check internet; if it persists, restart the PC and run this again (an old agent may still be running).
     echo [%date% %time%] ERROR download failed >> "%LOG%"
     echo  See log: %LOG%
     echo.
